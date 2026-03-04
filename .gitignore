@@ -1,0 +1,42 @@
+# ── Python ───────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ── Virtual environments ────────────────────────────────
+.env
+.venv/
+venv/
+env/
+
+# ── IDE ──────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── Runtime / data (never commit) ────────────────────────
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# ── Secrets / credentials ───────────────────────────────
+auth.json
+
+# ── OS ───────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Testing / linting ───────────────────────────────────
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+htmlcov/
+.coverage

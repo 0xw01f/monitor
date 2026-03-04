@@ -1,0 +1,15 @@
+services:
+  sentinelle:
+    build: .
+    container_name: sentinelle
+    ports:
+      - "8765:8765"
+    volumes:
+      - sentinelle_data:/app/data
+    environment:
+      - PYTHONUNBUFFERED=1
+      - SCAN_INTERVAL_HOURS=6
+    restart: unless-stopped
+
+volumes:
+  sentinelle_data:
