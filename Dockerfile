@@ -15,11 +15,18 @@ WORKDIR /app
 # Copy installed Python packages from builder
 COPY --from=builder /install /usr/local
 
-# Install Playwright dependencies and Chromium browser
+# Install system dependencies for Playwright Chromium
 RUN apt-get update && \
-    playwright install-deps chromium && \
-    playwright install chromium && \
-    rm -rf /var/lib/apt/lists/*
+    apt-get install -y --no-install-recommends \
+        libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
+        libdrm2 libxcomposite1 libxdamage1 libxrandr2 \
+        libgbm1 libpango-1.0-0 libcairo2 libasound2 \
+        libxshmfence1 libx11-xcb1 fonts-liberation \
+        libxkbcommon0 libxfixes3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Playwright Chromium browser
+RUN playwright install chromium
 
 # Copy application source
 COPY app/          app/
