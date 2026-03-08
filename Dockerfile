@@ -31,7 +31,7 @@ RUN playwright install chromium
 # Copy application source
 COPY app/          app/
 COPY frontend/     frontend/
-COPY requirements.txt targets.csv auth.json.example ./
+COPY requirements.txt auth.json.example ./
 
 # Provide default auth.json from template (overridable via volume mount)
 RUN cp auth.json.example auth.json

@@ -23,7 +23,6 @@ Web-based OSINT monitoring dashboard that tracks changes on target web pages usi
 │   ├── monitor.py           # Core engine: capture, hash, compare, alert
 │   ├── scheduler.py         # Auto-scan & daily report background loops
 │   ├── webhooks.py          # Webhook dispatch & integration helpers
-│   ├── csv_loader.py        # CSV target ingestion
 │   ├── schemas.py           # Pydantic request models
 │   ├── state.py             # Shared runtime state (scan lock, etc.)
 │   └── routes/              # API route modules
@@ -38,7 +37,6 @@ Web-based OSINT monitoring dashboard that tracks changes on target web pages usi
 ├── Dockerfile
 ├── docker-compose.yml
 ├── requirements.txt
-├── targets.csv              # Seed targets (name,url,category)
 └── auth.json.example        # Template for browser cookies (copy to auth.json)
 ```
 

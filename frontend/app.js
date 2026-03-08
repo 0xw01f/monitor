@@ -28,6 +28,18 @@ const API = {
         if (!res.ok) throw new Error(`API Error: ${res.status}`);
         return res.json();
     },
+    async put(url, data = {}) {
+        const res = await fetch(url, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || `API Error: ${res.status}`);
+        }
+        return res.json();
+    },
     async delete(url) {
         const res = await fetch(url, { method: 'DELETE' });
         if (!res.ok) throw new Error(`API Error: ${res.status}`);
@@ -205,6 +217,138 @@ function updateViewerSlider(value) {
     divider.style.left = `${val}%`;
 }
 
+const imageZoomState = {
+    overlay: null,
+    stage: null,
+    image: null,
+    scale: 1,
+    translateX: 0,
+    translateY: 0,
+    dragging: false,
+    dragStartX: 0,
+    dragStartY: 0,
+};
+
+function applyImageZoomTransform() {
+    if (!imageZoomState.image) return;
+    imageZoomState.image.style.transform = `translate(${imageZoomState.translateX}px, ${imageZoomState.translateY}px) scale(${imageZoomState.scale})`;
+}
+
+function resetImageZoomTransform() {
+    imageZoomState.scale = 1;
+    imageZoomState.translateX = 0;
+    imageZoomState.translateY = 0;
+    applyImageZoomTransform();
+}
+
+function closeImageZoom() {
+    if (!imageZoomState.overlay) return;
+    imageZoomState.overlay.style.display = 'none';
+    imageZoomState.dragging = false;
+    imageZoomState.stage?.classList.remove('is-dragging');
+}
+
+function isImageZoomOpen() {
+    return imageZoomState.overlay?.style.display === 'flex';
+}
+
+function openImageZoom(src, alt = 'Snapshot image') {
+    if (!src || !imageZoomState.overlay || !imageZoomState.image) return;
+    imageZoomState.image.src = src;
+    imageZoomState.image.alt = alt;
+    resetImageZoomTransform();
+    imageZoomState.overlay.style.display = 'flex';
+}
+
+function setupImageZoom() {
+    if (document.getElementById('image-zoom-overlay')) {
+        imageZoomState.overlay = document.getElementById('image-zoom-overlay');
+        imageZoomState.stage = document.getElementById('image-zoom-stage');
+        imageZoomState.image = document.getElementById('image-zoom-img');
+        return;
+    }
+
+    const overlay = document.createElement('div');
+    overlay.id = 'image-zoom-overlay';
+    overlay.className = 'image-zoom-overlay';
+    overlay.innerHTML = `
+        <div class="image-zoom-stage" id="image-zoom-stage">
+            <img id="image-zoom-img" class="image-zoom-img" alt="Zoomed snapshot" draggable="false">
+        </div>
+        <button type="button" class="image-zoom-close" id="image-zoom-close" aria-label="Close zoom">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+        </button>
+        <div class="image-zoom-hint">Wheel to zoom • Drag to pan • Esc to close</div>
+    `;
+    document.body.appendChild(overlay);
+
+    imageZoomState.overlay = overlay;
+    imageZoomState.stage = overlay.querySelector('#image-zoom-stage');
+    imageZoomState.image = overlay.querySelector('#image-zoom-img');
+
+    overlay.querySelector('#image-zoom-close')?.addEventListener('click', closeImageZoom);
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) closeImageZoom();
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (!isImageZoomOpen()) return;
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            closeImageZoom();
+            return;
+        }
+        if (e.key === '0') {
+            e.preventDefault();
+            resetImageZoomTransform();
+        }
+    });
+
+    imageZoomState.stage?.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const direction = e.deltaY < 0 ? 1.18 : 1 / 1.18;
+        imageZoomState.scale = Math.min(8, Math.max(1, imageZoomState.scale * direction));
+        if (imageZoomState.scale === 1) {
+            imageZoomState.translateX = 0;
+            imageZoomState.translateY = 0;
+        }
+        applyImageZoomTransform();
+    }, { passive: false });
+
+    imageZoomState.stage?.addEventListener('mousedown', (e) => {
+        if (imageZoomState.scale <= 1) return;
+        imageZoomState.dragging = true;
+        imageZoomState.dragStartX = e.clientX - imageZoomState.translateX;
+        imageZoomState.dragStartY = e.clientY - imageZoomState.translateY;
+        imageZoomState.stage.classList.add('is-dragging');
+    });
+
+    window.addEventListener('mousemove', (e) => {
+        if (!imageZoomState.dragging) return;
+        imageZoomState.translateX = e.clientX - imageZoomState.dragStartX;
+        imageZoomState.translateY = e.clientY - imageZoomState.dragStartY;
+        applyImageZoomTransform();
+    });
+
+    window.addEventListener('mouseup', () => {
+        if (!imageZoomState.dragging) return;
+        imageZoomState.dragging = false;
+        imageZoomState.stage?.classList.remove('is-dragging');
+    });
+
+    document.addEventListener('click', (e) => {
+        const img = e.target.closest('.diff-preview img, .comparison-panel img');
+        if (!img) return;
+        if (img.closest('#preview-overlay')) return;
+        e.stopPropagation();
+        openImageZoom(img.currentSrc || img.src, img.alt || 'Snapshot image');
+    });
+}
+
 window.openImageViewer = function (beforeUrl, afterUrl, diffUrl = '', options = {}) {
     const overlay = document.getElementById('image-viewer-overlay');
     const titleEl = document.getElementById('image-viewer-title');
@@ -296,6 +440,11 @@ function setupImageViewer() {
     const overlay = document.getElementById('image-viewer-overlay');
     const closeBtn = document.getElementById('image-viewer-close');
     const slider = document.getElementById('viewer-slider');
+    const zoomBtn = document.getElementById('viewer-zoom-current');
+    const viewerStage = document.getElementById('viewer-stage');
+    const beforeImg = document.getElementById('viewer-before-img');
+    const afterImg = document.getElementById('viewer-after-img');
+    const diffImg = document.getElementById('viewer-diff-img');
 
     function closeModal() {
         overlay.style.display = 'none';
@@ -315,6 +464,7 @@ function setupImageViewer() {
     }
 
     document.addEventListener('keydown', (e) => {
+        if (isImageZoomOpen()) return;
         if (e.key === 'Escape' && overlay && overlay.style.display === 'flex') {
             closeModal();
         }
@@ -324,6 +474,46 @@ function setupImageViewer() {
     if (slider) {
         slider.addEventListener('input', (e) => {
             updateViewerSlider(e.target.value);
+        });
+    }
+
+    const currentViewerSrc = () => {
+        const beforeSrc = beforeImg?.currentSrc || beforeImg?.src || '';
+        const afterSrc = afterImg?.currentSrc || afterImg?.src || '';
+        if (!beforeSrc) return afterSrc;
+        if (!afterSrc) return beforeSrc;
+        const split = Number(slider?.value || 50);
+        return split < 50 ? beforeSrc : afterSrc;
+    };
+
+    if (zoomBtn) {
+        zoomBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openImageZoom(currentViewerSrc(), 'Snapshot comparison');
+        });
+    }
+
+    if (viewerStage) {
+        viewerStage.addEventListener('dblclick', (e) => {
+            const beforeSrc = beforeImg?.currentSrc || beforeImg?.src || '';
+            const afterSrc = afterImg?.currentSrc || afterImg?.src || '';
+            if (!beforeSrc && !afterSrc) return;
+
+            let src = afterSrc || beforeSrc;
+            if (beforeSrc && afterSrc) {
+                const rect = viewerStage.getBoundingClientRect();
+                const pct = ((e.clientX - rect.left) / rect.width) * 100;
+                const split = Number(slider?.value || 50);
+                src = pct < split ? beforeSrc : afterSrc;
+            }
+            openImageZoom(src, 'Snapshot comparison');
+        });
+    }
+
+    if (diffImg) {
+        diffImg.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openImageZoom(diffImg.currentSrc || diffImg.src, diffImg.alt || 'Diff image');
         });
     }
 
@@ -798,6 +988,10 @@ async function renderTargetDetail(targetId) {
                         <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
                         Scan
                     </button>
+                    <button class="btn btn--ghost btn--sm" data-edit-target="${target.id}">
+                        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                        Edit
+                    </button>
                     <button class="btn btn--danger btn--sm" data-delete-target="${target.id}">
                         <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                         Delete
@@ -815,6 +1009,9 @@ async function renderTargetDetail(targetId) {
             <div class="section">
                 <div class="section__header">
                     <h2 class="section__title">Snapshot history</h2>
+                    <button class="btn btn--ghost btn--sm btn--danger-text" id="btn-clear-target-history">
+                        Clear history
+                    </button>
                 </div>
 
                 ${snapshots.length > 0
@@ -857,6 +1054,14 @@ async function renderTargetDetail(targetId) {
             }
         });
 
+        document.querySelector(`[data-edit-target="${target.id}"]`)?.addEventListener('click', async () => {
+            try {
+                await openEditModal(target.id);
+            } catch (err) {
+                showToast(err.message, 'error');
+            }
+        });
+
         // Delete button
         document.querySelector(`[data-delete-target="${target.id}"]`)?.addEventListener('click', async () => {
             const confirmed = await askConfirm({
@@ -882,10 +1087,10 @@ async function renderTargetDetail(targetId) {
             if (snapIndex === -1) return;
             const snap = snapshots[snapIndex];
             const prev = snapshots[snapIndex + 1];
-            const thumb = card.querySelector('.snapshot-card__thumb');
-            if (!thumb) return;
 
-            thumb.addEventListener('click', () => {
+            card.style.cursor = 'pointer';
+            card.addEventListener('click', (e) => {
+                if (e.target.closest('button, a, input, select, textarea, [role="button"]')) return;
                 const beforeUrl = snapshotImgUrl(prev?.id);
                 const afterUrl = snapshotImgUrl(snap?.id);
                 const diffUrl = snap?.has_diff ? snapshotDiffUrl(snap.id) : '';
@@ -898,6 +1103,23 @@ async function renderTargetDetail(targetId) {
                     similarity: snap?.similarity_score,
                 });
             });
+        });
+
+        document.getElementById('btn-clear-target-history')?.addEventListener('click', async () => {
+            const confirmed = await askConfirm({
+                title: 'Clear scan history',
+                message: `Delete all scan snapshots and alerts for "${target.name}"? This action is irreversible.`,
+                confirmLabel: 'Clear history',
+                confirmVariant: 'danger',
+            });
+            if (!confirmed) return;
+            try {
+                await API.delete(`/api/targets/${target.id}/history`);
+                showToast('Scan history cleared', 'success');
+                await renderTargetDetail(target.id);
+            } catch (err) {
+                showToast(err.message, 'error');
+            }
         });
 
     } catch (err) {
@@ -920,31 +1142,34 @@ function statCard(color, icon, value, label) {
 function targetCardHtml(t, showActions = false) {
     return `
         <div class="card target-card" data-target-id="${t.id}">
-            ${showActions ? `
-                <div class="target-card__actions">
-                    <button class="btn btn--ghost btn--sm" data-scan-target="${t.id}" title="Scan" onclick="event.stopPropagation()">
-                        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-                    </button>
-                    <button class="btn btn--ghost btn--sm" data-toggle-pause="${t.id}" data-current-status="${t.status || 'active'}" title="${t.status === 'paused' ? 'Resume monitoring' : 'Pause monitoring'}" onclick="event.stopPropagation()">
-                        ${t.status === 'paused'
-                            ? '<svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>'
-                            : '<svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>'
-                        }
-                    </button>
-                    <button class="btn btn--ghost btn--sm btn--danger-text" data-card-delete="${t.id}" title="Delete" onclick="event.stopPropagation()">
-                        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="color:#f87171"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                    </button>
-                </div>
-            ` : ''}
             <div class="target-card__header ${showActions ? 'target-card__header--with-actions' : ''}">
                 <div class="target-card__title-row">
                     <span class="target-card__name" title="${escapeHtml(t.name)}">${escapeHtml(t.name)}</span>
-                    <span class="target-card__category category--${t.category}">${CATEGORY_LABELS[t.category] || t.category}</span>
                 </div>
+                ${showActions ? `
+                    <div class="target-card__actions">
+                        <button class="btn btn--ghost btn--sm" data-scan-target="${t.id}" title="Scan" onclick="event.stopPropagation()">
+                            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                        </button>
+                        <button class="btn btn--ghost btn--sm" data-card-edit="${t.id}" title="Edit" onclick="event.stopPropagation()">
+                            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                        </button>
+                        <button class="btn btn--ghost btn--sm" data-toggle-pause="${t.id}" data-current-status="${t.status || 'active'}" title="${t.status === 'paused' ? 'Resume monitoring' : 'Pause monitoring'}" onclick="event.stopPropagation()">
+                            ${t.status === 'paused'
+                                ? '<svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>'
+                                : '<svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>'
+                            }
+                        </button>
+                        <button class="btn btn--ghost btn--sm btn--danger-text" data-card-delete="${t.id}" title="Delete" onclick="event.stopPropagation()">
+                            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="color:#f87171"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                        </button>
+                    </div>
+                ` : ''}
             </div>
             <div class="target-card__url">${escapeHtml(t.url)}</div>
             <div class="target-card__meta">
                 <div class="target-card__meta-item">
+                    <span class="target-card__category category--${t.category}" style="margin-right: 8px;">${CATEGORY_LABELS[t.category] || t.category}</span>
                     <div class="target-card__status target-card__status--${t.status || 'active'}"></div>
                     <span>${t.status === 'paused' ? 'Paused' : t.status === 'active' ? 'Active' : 'Inactive'}</span>
                 </div>
@@ -1189,6 +1414,8 @@ function bindScanButton() {
         btn.classList.add('scanning');
         btn.disabled = true;
         btn.querySelector('span')?.textContent || (btn.lastChild.textContent = ' Scanning…');
+        const cards = document.querySelectorAll('.target-card');
+        cards.forEach(card => card.classList.add('is-scanning'));
         try {
             const result = await API.post('/api/scan');
             showToast(result.message, 'success');
@@ -1198,6 +1425,7 @@ function bindScanButton() {
         } finally {
             btn.classList.remove('scanning');
             btn.disabled = false;
+            cards.forEach(card => card.classList.remove('is-scanning'));
         }
     });
 
@@ -1245,6 +1473,19 @@ function bindTargetCards() {
     document.querySelectorAll('.target-card[data-target-id]').forEach(card => {
         card.addEventListener('click', () => {
             window.location.hash = `#/targets/${card.dataset.targetId}`;
+        });
+    });
+
+    // Delete buttons on cards
+    document.querySelectorAll('[data-card-edit]').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const targetId = parseInt(btn.dataset.cardEdit, 10);
+            try {
+                await openEditModal(targetId);
+            } catch (err) {
+                showToast(err.message, 'error');
+            }
         });
     });
 
@@ -1316,7 +1557,72 @@ function bindAlertActions() {
 
 // ── Modal Management ───────────────────────────
 
+const targetFormState = {
+    mode: 'create',
+    targetId: null,
+};
+
+function setTargetModalMode(mode = 'create') {
+    targetFormState.mode = mode;
+    const title = document.querySelector('#add-target-modal .modal__title');
+    const submitBtn = document.querySelector('#add-target-form button[type="submit"]');
+    if (title) title.textContent = mode === 'edit' ? 'Edit target' : 'Add target';
+    if (submitBtn) submitBtn.innerHTML = mode === 'edit'
+        ? `<svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>Save`
+        : `<svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Add`;
+}
+
+function renderSelectionSummaryFromInputs() {
+    const summary = document.getElementById('selection-summary');
+    const selector = document.getElementById('target-css-selector')?.value?.trim();
+    const cropX = document.getElementById('target-crop-x')?.value;
+    const cropY = document.getElementById('target-crop-y')?.value;
+    const cropW = document.getElementById('target-crop-w')?.value;
+    const cropH = document.getElementById('target-crop-h')?.value;
+
+    if (!summary) return;
+
+    if (selector) {
+        summary.innerHTML = `
+            <div style="display:flex;align-items:center;gap:8px;">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="var(--accent-cyan)" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+                <strong style="color:var(--accent-cyan)">HTML Element</strong>
+            </div>
+            <div style="margin-top:4px; font-family:JetBrains Mono,monospace; color:var(--accent-cyan); font-size:0.72rem; word-break:break-all;">
+                ${escapeHtml(selector)}
+            </div>
+        `;
+        summary.style.display = 'block';
+        return;
+    }
+
+    const hasCrop = [cropX, cropY, cropW, cropH].every(v => v !== '' && !Number.isNaN(Number(v)));
+    if (hasCrop) {
+        summary.innerHTML = `
+            <div style="display:flex;align-items:center;gap:8px;">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="var(--accent-violet)" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" stroke-dasharray="4 2"/></svg>
+                <strong style="color:var(--accent-violet)">Rectangle Area</strong>
+            </div>
+            <div style="margin-top:4px; font-family:JetBrains Mono,monospace; color:var(--text-secondary);">
+                X:${cropX} Y:${cropY} — ${cropW}×${cropH}px
+            </div>
+        `;
+        summary.style.display = 'block';
+        return;
+    }
+
+    summary.style.display = 'none';
+    summary.innerHTML = '';
+}
+
 function openAddModal() {
+    targetFormState.targetId = null;
+    setTargetModalMode('create');
+    document.getElementById('add-target-form')?.reset();
+    ['target-css-selector', 'target-crop-x', 'target-crop-y', 'target-crop-w', 'target-crop-h'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
     document.getElementById('modal-overlay').style.display = 'flex';
     // Reset selection state
     previewState.reset();
@@ -1324,9 +1630,30 @@ function openAddModal() {
     document.getElementById('selection-summary').innerHTML = '';
 }
 
+async function openEditModal(targetId) {
+    const target = await API.get(`/api/targets/${targetId}`);
+    targetFormState.targetId = targetId;
+    setTargetModalMode('edit');
+
+    previewState.reset();
+
+    document.getElementById('target-name').value = target.name || '';
+    document.getElementById('target-url').value = target.url || '';
+    document.getElementById('target-category').value = target.category || 'general';
+    document.getElementById('target-css-selector').value = target.css_selector || '';
+    document.getElementById('target-crop-x').value = target.crop_x ?? '';
+    document.getElementById('target-crop-y').value = target.crop_y ?? '';
+    document.getElementById('target-crop-w').value = target.crop_w ?? '';
+    document.getElementById('target-crop-h').value = target.crop_h ?? '';
+    renderSelectionSummaryFromInputs();
+    document.getElementById('modal-overlay').style.display = 'flex';
+}
+
 function closeAddModal() {
     document.getElementById('modal-overlay').style.display = 'none';
     document.getElementById('add-target-form').reset();
+    setTargetModalMode('create');
+    targetFormState.targetId = null;
     previewState.reset();
     document.getElementById('selection-summary').style.display = 'none';
 }
@@ -1358,8 +1685,13 @@ document.getElementById('add-target-form')?.addEventListener('submit', async (e)
     }
 
     try {
-        await API.post('/api/targets', payload);
-        showToast(`Target "${name}" added`, 'success');
+        if (targetFormState.mode === 'edit' && targetFormState.targetId) {
+            await API.put(`/api/targets/${targetFormState.targetId}`, payload);
+            showToast(`Target "${name}" updated`, 'success');
+        } else {
+            await API.post('/api/targets', payload);
+            showToast(`Target "${name}" added`, 'success');
+        }
         closeAddModal();
         await router();
     } catch (err) {
@@ -1378,6 +1710,11 @@ const previewState = {
 
     // Rectangle mode state
     isDrawing: false,
+    isDraggingRect: false,
+    isResizingRect: false,
+    resizeCorner: null,
+    dragOffsetX: 0,
+    dragOffsetY: 0,
     startX: 0,
     startY: 0,
     rect: null, // {x, y, w, h} in real coords
@@ -1390,6 +1727,11 @@ const previewState = {
         this.elements = [];
         this.rect = null;
         this.isDrawing = false;
+        this.isDraggingRect = false;
+        this.isResizingRect = false;
+        this.resizeCorner = null;
+        this.dragOffsetX = 0;
+        this.dragOffsetY = 0;
         this.hoveredElement = null;
         this.selectedElement = null;
         // Clear hidden inputs
@@ -1414,8 +1756,24 @@ document.getElementById('btn-preview')?.addEventListener('click', async () => {
     document.getElementById('preview-loading').style.display = 'flex';
     document.getElementById('preview-img').style.display = 'none';
 
+    const currentSelector = (document.getElementById('target-css-selector')?.value || '').trim();
+    const currentCropX = Number(document.getElementById('target-crop-x')?.value);
+    const currentCropY = Number(document.getElementById('target-crop-y')?.value);
+    const currentCropW = Number(document.getElementById('target-crop-w')?.value);
+    const currentCropH = Number(document.getElementById('target-crop-h')?.value);
+
+    const hasCrop = [currentCropX, currentCropY, currentCropW, currentCropH].every(v => !Number.isNaN(v)) && currentCropW > 0 && currentCropH > 0;
+    previewState.rect = hasCrop ? {
+        x: Math.round(currentCropX),
+        y: Math.round(currentCropY),
+        w: Math.round(currentCropW),
+        h: Math.round(currentCropH),
+    } : null;
+    previewState.selectedElement = null;
+    previewState.hoveredElement = null;
+
     // Set default mode
-    setPreviewMode('rect');
+    setPreviewMode(currentSelector ? 'element' : 'rect');
 
     try {
         const data = await API.post('/api/preview', { url });
@@ -1436,7 +1794,23 @@ document.getElementById('btn-preview')?.addEventListener('click', async () => {
 
             document.getElementById('preview-loading').style.display = 'none';
             img.style.display = 'block';
+
+            if (currentSelector) {
+                previewState.selectedElement = previewState.elements.find(el => el.xpath === currentSelector) || null;
+            }
+
             clearCanvas();
+            if (previewState.mode === 'rect' && previewState.rect) {
+                drawRect(previewState.rect);
+                document.getElementById('preview-info-text').textContent =
+                    `Current area: ${previewState.rect.w}×${previewState.rect.h}px — drag to move, drag corner to resize`;
+            }
+            if (previewState.mode === 'element' && previewState.selectedElement) {
+                drawElementHighlight(previewState.selectedElement, true);
+                const el = previewState.selectedElement;
+                document.getElementById('preview-info-text').textContent =
+                    `Current element: <${el.tagName}${el.id ? '#' + el.id : ''}> — click another to change`;
+            }
         };
     } catch (err) {
         showToast(`Preview error: ${err.message}`, 'error');
@@ -1578,12 +1952,22 @@ function drawRect(r) {
         ctx.fillRect(cx - handleSize / 2, cy - handleSize / 2, handleSize, handleSize);
     });
 
-    // Dimension label
-    ctx.fillStyle = 'rgba(167,139,250,0.9)';
+    // Dimension label with strong contrast
     ctx.font = 'bold 12px JetBrains Mono, monospace';
     const label = `${r.w}×${r.h}`;
-    const labelX = r.x + r.w / 2 - ctx.measureText(label).width / 2;
+    const textWidth = ctx.measureText(label).width;
+    const labelX = r.x + r.w / 2 - textWidth / 2;
     const labelY = r.y + r.h + 18;
+    const boxPadX = 7;
+    const boxW = textWidth + boxPadX * 2;
+    const boxX = labelX - boxPadX;
+    const boxY = labelY - 13;
+    ctx.fillStyle = 'rgba(9, 13, 18, 0.92)';
+    ctx.fillRect(boxX, boxY, boxW, 18);
+    ctx.strokeStyle = 'rgba(167,139,250,0.9)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(boxX, boxY, boxW, 18);
+    ctx.fillStyle = '#e9ecf2';
     ctx.fillText(label, labelX, labelY);
 }
 
@@ -1607,15 +1991,53 @@ function drawElementHighlight(el, isSelected = false) {
     }
 
     // Tag label
-    const bgColor = isSelected ? '#06b6d4' : 'rgba(96,165,250,0.8)';
+    const bgColor = 'rgba(8, 12, 18, 0.94)';
+    const borderColor = isSelected ? '#06b6d4' : '#7fb6ff';
     const tagLabel = `<${el.tagName}${el.id ? '#' + el.id : ''}>${el.text ? ' ' + el.text.substring(0, 30) : ''}`;
     ctx.font = '11px JetBrains Mono, monospace';
     const textW = ctx.measureText(tagLabel).width + 10;
     const labelY = Math.max(r.y - 20, 0);
     ctx.fillStyle = bgColor;
     ctx.fillRect(r.x, labelY, textW, 18);
-    ctx.fillStyle = '#fff';
+    ctx.strokeStyle = borderColor;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(r.x, labelY, textW, 18);
+    ctx.fillStyle = '#f3f7ff';
     ctx.fillText(tagLabel, r.x + 5, labelY + 13);
+}
+
+function clampRectToCanvas(rect, canvas) {
+    const maxW = canvas.width;
+    const maxH = canvas.height;
+    const w = Math.max(6, Math.min(rect.w, maxW));
+    const h = Math.max(6, Math.min(rect.h, maxH));
+    const x = Math.max(0, Math.min(rect.x, maxW - w));
+    const y = Math.max(0, Math.min(rect.y, maxH - h));
+    return {
+        x: Math.round(x),
+        y: Math.round(y),
+        w: Math.round(w),
+        h: Math.round(h),
+    };
+}
+
+function getRectCornerHit(rect, point, threshold = 12) {
+    const corners = {
+        nw: { x: rect.x, y: rect.y },
+        ne: { x: rect.x + rect.w, y: rect.y },
+        sw: { x: rect.x, y: rect.y + rect.h },
+        se: { x: rect.x + rect.w, y: rect.y + rect.h },
+    };
+    for (const [name, c] of Object.entries(corners)) {
+        if (Math.abs(point.x - c.x) <= threshold && Math.abs(point.y - c.y) <= threshold) {
+            return name;
+        }
+    }
+    return null;
+}
+
+function isPointInRect(rect, point) {
+    return point.x >= rect.x && point.x <= rect.x + rect.w && point.y >= rect.y && point.y <= rect.y + rect.h;
 }
 
 // Canvas event listeners
@@ -1625,6 +2047,24 @@ if (previewCanvas) {
     previewCanvas.addEventListener('mousedown', (e) => {
         if (previewState.mode !== 'rect') return;
         const coords = getCanvasCoords(e);
+        const existingRect = previewState.rect;
+        if (existingRect) {
+            const corner = getRectCornerHit(existingRect, coords);
+            if (corner) {
+                previewState.isResizingRect = true;
+                previewState.resizeCorner = corner;
+                previewState.startX = coords.x;
+                previewState.startY = coords.y;
+                return;
+            }
+            if (isPointInRect(existingRect, coords)) {
+                previewState.isDraggingRect = true;
+                previewState.dragOffsetX = coords.x - existingRect.x;
+                previewState.dragOffsetY = coords.y - existingRect.y;
+                return;
+            }
+        }
+
         previewState.isDrawing = true;
         previewState.startX = coords.x;
         previewState.startY = coords.y;
@@ -1646,6 +2086,55 @@ if (previewCanvas) {
 
             document.getElementById('preview-info-text').textContent =
                 `Area: X:${Math.round(x)} Y:${Math.round(y)} — ${Math.round(w)}×${Math.round(h)}px`;
+        }
+
+        if (previewState.mode === 'rect' && previewState.isDraggingRect && previewState.rect) {
+            const canvas = document.getElementById('preview-canvas');
+            const moved = {
+                x: coords.x - previewState.dragOffsetX,
+                y: coords.y - previewState.dragOffsetY,
+                w: previewState.rect.w,
+                h: previewState.rect.h,
+            };
+            previewState.rect = clampRectToCanvas(moved, canvas);
+            clearCanvas();
+            drawRect(previewState.rect);
+            document.getElementById('preview-info-text').textContent =
+                `Area moved: X:${previewState.rect.x} Y:${previewState.rect.y} — ${previewState.rect.w}×${previewState.rect.h}px`;
+        }
+
+        if (previewState.mode === 'rect' && previewState.isResizingRect && previewState.rect) {
+            const canvas = document.getElementById('preview-canvas');
+            const r = { ...previewState.rect };
+            const minSize = 6;
+
+            if (previewState.resizeCorner === 'se') {
+                r.w = Math.max(minSize, Math.round(coords.x - r.x));
+                r.h = Math.max(minSize, Math.round(coords.y - r.y));
+            } else if (previewState.resizeCorner === 'sw') {
+                const nextX = Math.min(r.x + r.w - minSize, coords.x);
+                r.w = Math.max(minSize, Math.round(r.x + r.w - nextX));
+                r.x = Math.round(nextX);
+                r.h = Math.max(minSize, Math.round(coords.y - r.y));
+            } else if (previewState.resizeCorner === 'ne') {
+                const nextY = Math.min(r.y + r.h - minSize, coords.y);
+                r.h = Math.max(minSize, Math.round(r.y + r.h - nextY));
+                r.y = Math.round(nextY);
+                r.w = Math.max(minSize, Math.round(coords.x - r.x));
+            } else if (previewState.resizeCorner === 'nw') {
+                const nextX = Math.min(r.x + r.w - minSize, coords.x);
+                const nextY = Math.min(r.y + r.h - minSize, coords.y);
+                r.w = Math.max(minSize, Math.round(r.x + r.w - nextX));
+                r.h = Math.max(minSize, Math.round(r.y + r.h - nextY));
+                r.x = Math.round(nextX);
+                r.y = Math.round(nextY);
+            }
+
+            previewState.rect = clampRectToCanvas(r, canvas);
+            clearCanvas();
+            drawRect(previewState.rect);
+            document.getElementById('preview-info-text').textContent =
+                `Area resized: ${previewState.rect.w}×${previewState.rect.h}px`;
         }
 
         if (previewState.mode === 'element') {
@@ -1686,9 +2175,12 @@ if (previewCanvas) {
     previewCanvas.addEventListener('mouseup', (e) => {
         if (previewState.mode === 'rect') {
             previewState.isDrawing = false;
+            previewState.isDraggingRect = false;
+            previewState.isResizingRect = false;
+            previewState.resizeCorner = null;
             if (previewState.rect && previewState.rect.w > 5 && previewState.rect.h > 5) {
                 document.getElementById('preview-info-text').textContent =
-                    `✓ Area selected: ${previewState.rect.w}×${previewState.rect.h}px — Click "Validate" to confirm`;
+                    `✓ Area ready: ${previewState.rect.w}×${previewState.rect.h}px — Click "Validate" to confirm`;
             }
         }
     });
@@ -1733,6 +2225,7 @@ async function updateAlertBadge() {
 window.addEventListener('hashchange', router);
 
 function init() {
+    setupImageZoom();
     setupImageViewer();
     router();
     // Periodic badge update

@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException
 
 from ..database import get_db, get_target
 from ..schemas import ScanRequest, PreviewRequest
-from ..monitor import run_scan, preview_page
+from ..monitor import run_in_playwright_loop, run_scan, preview_page
 from .. import state
 
 logger = logging.getLogger("sentinelle.api")
@@ -48,15 +48,18 @@ async def trigger_scan(body: ScanRequest = None):
 @router.post("/preview")
 async def preview(body: PreviewRequest):
     """Load a URL with Playwright and return screenshot + element map for visual selection."""
-    from playwright.async_api import async_playwright
-
     try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            try:
-                screenshot_bytes, elements = await preview_page(body.url, browser)
-            finally:
-                await browser.close()
+        async def _preview_with_playwright():
+            from playwright.async_api import async_playwright
+
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=True)
+                try:
+                    return await preview_page(body.url, browser)
+                finally:
+                    await browser.close()
+
+        screenshot_bytes, elements = await run_in_playwright_loop(_preview_with_playwright)
 
         screenshot_b64 = base64.b64encode(screenshot_bytes).decode("utf-8")
         return {

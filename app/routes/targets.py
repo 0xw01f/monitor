@@ -8,7 +8,9 @@ from ..database import (
     get_all_targets,
     get_target,
     create_target,
+    update_target,
     delete_target,
+    clear_target_history,
     set_target_status,
     get_target_snapshots,
     get_stats,
@@ -79,6 +81,43 @@ async def remove_target(target_id: int):
             raise HTTPException(status_code=404, detail="Target not found")
         await delete_target(db, target_id)
         return {"message": "Target deleted"}
+    finally:
+        await db.close()
+
+
+@router.delete("/targets/{target_id}/history")
+async def remove_target_history(target_id: int):
+    db = await get_db()
+    try:
+        target = await get_target(db, target_id)
+        if not target:
+            raise HTTPException(status_code=404, detail="Target not found")
+        await clear_target_history(db, target_id)
+        return {"message": "Scan history cleared"}
+    finally:
+        await db.close()
+
+
+@router.put("/targets/{target_id}")
+async def edit_target(target_id: int, body: TargetCreate):
+    db = await get_db()
+    try:
+        target = await get_target(db, target_id)
+        if not target:
+            raise HTTPException(status_code=404, detail="Target not found")
+        await update_target(
+            db,
+            target_id,
+            body.name,
+            body.url,
+            body.category,
+            body.css_selector,
+            body.crop_x,
+            body.crop_y,
+            body.crop_w,
+            body.crop_h,
+        )
+        return {"message": "Target updated"}
     finally:
         await db.close()
 

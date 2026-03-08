@@ -14,7 +14,6 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.getenv("SENTINELLE_DATA_DIR", str(PROJECT_ROOT / "data")))
 FRONTEND_DIR = PROJECT_ROOT / "frontend"
 AUTH_FILE = PROJECT_ROOT / "auth.json"
-TARGETS_CSV = PROJECT_ROOT / "targets.csv"
 
 DATABASE_PATH = Path(os.getenv("SENTINELLE_DB_PATH", str(DATA_DIR / "sentinelle.db")))
 

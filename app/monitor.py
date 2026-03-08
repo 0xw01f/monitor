@@ -10,8 +10,10 @@ import json
 import logging
 import random
 import re
+import sys
 from io import BytesIO
 from datetime import datetime, timezone
+from typing import Awaitable, Callable, TypeVar
 
 from PIL import Image
 import numpy as np
@@ -41,6 +43,25 @@ from .database import (
 from .webhooks import dispatch_alert_notifications
 
 logger = logging.getLogger("sentinelle.monitor")
+
+T = TypeVar("T")
+
+
+def _run_coro_in_proactor_loop(coro: Awaitable[T]) -> T:
+    loop = asyncio.ProactorEventLoop()
+    try:
+        asyncio.set_event_loop(loop)
+        return loop.run_until_complete(coro)
+    finally:
+        loop.run_until_complete(loop.shutdown_asyncgens())
+        loop.close()
+        asyncio.set_event_loop(None)
+
+
+async def run_in_playwright_loop(coro_factory: Callable[[], Awaitable[T]]) -> T:
+    if sys.platform != "win32":
+        return await coro_factory()
+    return await asyncio.to_thread(_run_coro_in_proactor_loop, coro_factory())
 
 
 # ── Text Processing ─────────────────────────────────────
@@ -576,18 +597,20 @@ async def run_scan(targets: list = None):
         logger.info("No active targets to scan.")
         return []
 
-    results = []
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        try:
-            for target in targets:
-                result = await check_target(target, browser)
-                results.append(result)
-                logger.info(
-                    f"[{'!' if result['alert_generated'] else '✓'}] "
-                    f"{target['name']}: {result['status']}"
-                )
-        finally:
-            await browser.close()
+    async def _run_with_playwright() -> list:
+        results = []
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            try:
+                for target in targets:
+                    result = await check_target(target, browser)
+                    results.append(result)
+                    logger.info(
+                        f"[{'!' if result['alert_generated'] else '✓'}] "
+                        f"{target['name']}: {result['status']}"
+                    )
+            finally:
+                await browser.close()
+        return results
 
-    return results
+    return await run_in_playwright_loop(_run_with_playwright)

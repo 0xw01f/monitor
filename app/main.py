@@ -7,6 +7,7 @@ Entry point: creates the app, wires up routers, serves the frontend.
 """
 import asyncio
 import logging
+import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -15,7 +16,6 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import FRONTEND_DIR, SCAN_INTERVAL_HOURS
 from .database import init_db
-from .csv_loader import load_targets_from_csv
 from .scheduler import auto_scan_loop, daily_report_loop
 from .routes import all_routers
 
@@ -28,13 +28,23 @@ logging.basicConfig(
 logger = logging.getLogger("sentinelle.api")
 
 
+def _configure_windows_event_loop() -> None:
+    if sys.platform != "win32":
+        return
+    policy = asyncio.get_event_loop_policy()
+    if not isinstance(policy, asyncio.WindowsProactorEventLoopPolicy):
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+
+
+_configure_windows_event_loop()
+
+
 # ── Lifespan ─────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize DB, load CSV targets, start background schedulers."""
     await init_db()
-    await load_targets_from_csv()
 
     scan_task = asyncio.create_task(auto_scan_loop())
     report_task = asyncio.create_task(daily_report_loop())

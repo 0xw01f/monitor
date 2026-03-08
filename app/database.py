@@ -121,9 +121,39 @@ async def delete_target(db: aiosqlite.Connection, target_id: int):
     await db.commit()
 
 
+async def clear_target_history(db: aiosqlite.Connection, target_id: int):
+    await db.execute("DELETE FROM alerts WHERE target_id = ?", (target_id,))
+    await db.execute("DELETE FROM snapshots WHERE target_id = ?", (target_id,))
+    await db.execute("UPDATE targets SET last_hash = NULL, last_check = NULL WHERE id = ?", (target_id,))
+    await db.commit()
+
+
 async def set_target_status(db: aiosqlite.Connection, target_id: int, status: str):
     """Set the status of a target ('active' or 'paused')."""
     await db.execute("UPDATE targets SET status = ? WHERE id = ?", (status, target_id))
+    await db.commit()
+
+
+async def update_target(
+    db: aiosqlite.Connection,
+    target_id: int,
+    name: str,
+    url: str,
+    category: str = "general",
+    css_selector: str = None,
+    crop_x: int = None,
+    crop_y: int = None,
+    crop_w: int = None,
+    crop_h: int = None,
+):
+    await db.execute(
+        """
+        UPDATE targets
+        SET name = ?, url = ?, category = ?, css_selector = ?, crop_x = ?, crop_y = ?, crop_w = ?, crop_h = ?
+        WHERE id = ?
+        """,
+        (name, url, category, css_selector, crop_x, crop_y, crop_w, crop_h, target_id),
+    )
     await db.commit()
 
 
